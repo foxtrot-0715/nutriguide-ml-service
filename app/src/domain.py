@@ -79,3 +79,11 @@ class AnalysisTask:
         # Используем наш Enum вместо строки
         self.status = TaskStatus.CREATED 
         self.created_at = datetime.now()
+
+import time
+
+if __name__ == "__main__":
+    print("Приложение Nutriguide-ML запущено...")
+    # Бесконечный цикл, чтобы контейнер не закрывался
+    while True:
+        time.sleep(10)

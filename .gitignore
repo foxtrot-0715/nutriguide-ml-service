@@ -12,3 +12,20 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# Контейнерные данные
+postgres_data/
+rabbitmq_data/
+
+# Секреты и настройки
+.env
+app/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Системное
+.DS_Store
