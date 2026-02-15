@@ -1,5 +1,6 @@
-from src.database import SessionLocal, engine, Base
-from src.models import User, Balance, Transaction
+from sqlalchemy.orm import Session
+from src.database.database import SessionLocal, engine
+from src.database.models import Base, User, Balance, Transaction, GenderEnum, TransactionType
 
 def init_db():
     # 1. Создаем все таблицы в базе
@@ -15,7 +16,10 @@ def init_db():
                 username="admin", 
                 email="admin@nutriguide.com", 
                 is_admin=True,
-                age=35, height=180.0, weight=85.0, gender="male"
+                age=35, 
+                height=180.0, 
+                weight=85.0, 
+                gender=GenderEnum.MALE  # <--- ИСПРАВЛЕНО: Используем Enum
             )
             db.add(admin)
             db.commit()
@@ -25,17 +29,22 @@ def init_db():
             admin_balance = Balance(user_id=admin.id, credits=999999)
             db.add(admin_balance)
             
-            # Фиксируем это в истории
-            log = Transaction(user_id=admin.id, amount=999999, description="Initial admin endowment")
+            # Фиксируем это в истории с указанием типа транзакции
+            log = Transaction(
+                user_id=admin.id, 
+                amount=999999, 
+                tx_type=TransactionType.REFILL, # <--- ИСПРАВЛЕНО: Добавлен обязательный тип
+                description="Initial admin endowment"
+            )
             db.add(log)
             
-            print("База инициализирована: Админ создан!")
+            print("Database initialized: Admin user created.")
         else:
-            print("База уже содержит данные, пропускаем...")
+            print("Database already contains data, skipping...")
             
         db.commit()
     except Exception as e:
-        print(f"Ошибка при инициализации: {e}")
+        print(f"Initialization error: {e}")
         db.rollback()
     finally:
         db.close()
