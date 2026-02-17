@@ -1,0 +1,3 @@
+sqlalchemy>=2.0.0
+psycopg2-binary  # Драйвер для PostgreSQL
+python-dotenv    # Для чтения .env

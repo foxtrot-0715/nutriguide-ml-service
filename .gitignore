@@ -20,6 +20,9 @@ rabbitmq_data/
 # Секреты и настройки
 .env
 app/.env
+.env.*
+!.env.example
+*.log
 
 # Python
 __pycache__/
