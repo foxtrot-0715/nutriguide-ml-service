@@ -31,7 +31,7 @@ class DepositRequest(BaseModel):
 
 # Схемы ML
 class PredictRequest(BaseModel):
-    data: str # Здесь могут быть параметры для твоей модели
+    data: str # Здесь могут быть параметры для модели
 
 class PredictResponse(BaseModel):
     task_id: int
