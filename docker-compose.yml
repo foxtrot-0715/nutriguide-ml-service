@@ -8,6 +8,11 @@ services:
       - ./app/.env
     volumes:
       - ./app/src:/app/src
+    # Добавляем команду запуска uvicorn
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    # Пробрасываем порт 8000 наружу (на всякий случай, чтобы иметь прямой доступ мимо прокси)
+    ports:
+      - "8000:8000"
     depends_on:
       - database
       - rabbitmq
