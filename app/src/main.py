@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import List
 import pika
@@ -11,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 from src.database.database import get_db, init_db
 from src.database import models
-# Импортируем все необходимые схемы напрямую
+# Импортируем схемы напрямую
 from src.schemas import (
     UserCreate, 
     UserOut, 
@@ -29,6 +31,17 @@ except Exception as e:
     logger.error(f"--- ОШИБКА ИНИЦИАЛИЗАЦИИ БД: {e} ---")
 
 app = FastAPI(title="NutriGuide ML Service Full API")
+
+# --- Настройка фронтенда (WebUI) ---
+# Подключаем папку со статикой (css, js) и шаблонами (html)
+app.mount("/static", StaticFiles(directory="src/static"), name="static")
+templates = Jinja2Templates(directory="src/templates")
+
+# --- 0. UI Эндпоинт (Главная страница) ---
+@app.get("/", tags=["UI"])
+def index(request: Request):
+    """Отдает главную страницу нашего веб-интерфейса"""
+    return templates.TemplateResponse("index.html", {"request": request})
 
 # --- 1. Системные эндпоинты ---
 @app.get("/health", tags=["System"])
@@ -79,7 +92,7 @@ def deposit_money(user_id: int, req: DepositRequest, db: Session = Depends(get_d
     balance.credits += req.amount
     db.commit()
     logger.info(f"Баланс юзера {user_id} пополнен на {req.amount}")
-    return {"message": f"Successfully added {req.amount} credits", "new_balance": balance.credits}
+    return {"message": "Success", "new_balance": balance.credits}
 
 # --- 4. ML Engine (Задачи) ---
 @app.post("/predict/{user_id}", response_model=PredictResponse, tags=["ML Engine"])
@@ -107,7 +120,7 @@ def predict(user_id: int, req: PredictRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_task)
 
-        # Отправка в очередь
+        # Отправка в очередь RabbitMQ
         connection = pika.BlockingConnection(pika.ConnectionParameters(host='rabbitmq'))
         channel = connection.channel()
         channel.queue_declare(queue='ml_tasks', durable=True)
