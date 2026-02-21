@@ -1,54 +1,72 @@
 let currentUserId = localStorage.getItem('userId');
 
-// 1. Регистрация (Пункт 2 ТЗ)
-async function handleRegister() {
-    const username = document.getElementById('regName').value;
-    const email = document.getElementById('regEmail').value;
-    const password = document.getElementById('regPass').value;
-
-    const response = await fetch('/auth/register', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ username, email, password })
-    });
-
-    if (response.ok) {
-        const user = await response.json();
-        saveUserSession(user.id, user.username);
-        alert('Успешная регистрация!');
-        location.reload(); // Перезагрузим, чтобы открылся кабинет
-    } else {
-        const err = await response.json();
-        alert('Ошибка: ' + (err.detail || 'Не удалось зарегистрироваться'));
-    }
-}
-
 function saveUserSession(id, name) {
     localStorage.setItem('userId', id);
     localStorage.setItem('userName', name);
 }
 
-// 2. Инициализация кабинета
-if (currentUserId) {
-    document.getElementById('cabinet-tab').classList.remove('disabled');
-    document.getElementById('userBadge').classList.remove('d-none');
-    document.getElementById('currentUserId').innerText = currentUserId;
-    document.getElementById('currentUsername').innerText = localStorage.getItem('userName');
-    
-    // Переключим на кабинет автоматически
-    const cabinetTab = new bootstrap.Tab(document.getElementById('cabinet-tab'));
-    cabinetTab.show();
-    
-    updateBalance();
-    updateTasks();
-    setInterval(updateTasks, 5000);
+function handleLogout() {
+    if (confirm("Выйти из системы?")) {
+        localStorage.clear();
+        location.reload();
+    }
 }
 
-// 3. Работа с балансом
+async function handleLogin() {
+    const username = document.getElementById('loginName').value;
+    const password = document.getElementById('loginPass').value;
+    if (!username) return alert("Введите имя!");
+
+    const response = await fetch('/auth/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ username, password: password || '123', email: 'login@dummy.com' })
+    });
+    if (response.ok) {
+        const user = await response.json();
+        saveUserSession(user.id, user.username);
+        location.reload();
+    } else alert("Пользователь не найден");
+}
+
+async function handleRegister() {
+    const username = document.getElementById('regName').value;
+    const email = document.getElementById('regEmail').value;
+    const password = document.getElementById('regPass').value;
+    const response = await fetch('/auth/register', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ username, email, password })
+    });
+    if (response.ok) {
+        const user = await response.json();
+        saveUserSession(user.id, user.username);
+        location.reload();
+    } else alert("Ошибка регистрации");
+}
+
+function checkAuth(event) {
+    if (event) event.preventDefault();
+    if (!currentUserId) {
+        alert("Пожалуйста, войдите в систему!");
+        new bootstrap.Tab(document.getElementById('auth-tab')).show();
+    } else {
+        const btn = document.getElementById('cabinet-tab');
+        btn.setAttribute('data-bs-toggle', 'tab');
+        btn.setAttribute('data-bs-target', '#cabinet');
+        new bootstrap.Tab(btn).show();
+        updateBalance();
+        updateTasks();
+    }
+}
+
 async function updateBalance() {
-    const response = await fetch(`/users/${currentUserId}/balance`);
-    const data = await response.json();
-    document.getElementById('balanceAmount').innerText = data.credits;
+    if (!currentUserId) return;
+    try {
+        const res = await fetch(`/users/${currentUserId}/balance`);
+        const data = await res.json();
+        document.getElementById('balanceAmount').innerText = data.credits;
+    } catch (e) { console.error("Balance error:", e); }
 }
 
 async function makeDeposit() {
@@ -61,43 +79,61 @@ async function makeDeposit() {
     updateBalance();
 }
 
-// 4. ML-запрос и История
 async function sendPredict() {
     const data = document.getElementById('predictInput').value;
-    const response = await fetch(`/predict/${currentUserId}`, {
+    if (!data) return alert("Введите данные!");
+    
+    const res = await fetch(`/predict/${currentUserId}`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ data })
     });
-    
-    if (response.status === 402) alert('Пополните баланс!');
-    else if (response.ok) { updateTasks(); updateBalance(); }
+    if (res.status === 402) alert("Недостаточно кредитов!");
+    else {
+        updateBalance();
+        updateTasks();
+        document.getElementById('predictInput').value = '';
+    }
 }
 
 async function updateTasks() {
-    const response = await fetch(`/users/${currentUserId}/tasks`);
-    const tasks = await response.json();
-    const tbody = document.getElementById('tasksHistory');
-    tbody.innerHTML = '';
+    if (!currentUserId) return;
+    try {
+        const res = await fetch(`/users/${currentUserId}/tasks`);
+        const tasks = await res.json();
+        const tbody = document.getElementById('tasksHistory');
+        if (!tbody) return;
+        
+        tbody.innerHTML = '';
+        if (tasks.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">История пока пуста</td></tr>';
+            return;
+        }
 
-    tasks.reverse().forEach(t => {
-        const date = t.created_at ? new Date(t.created_at).toLocaleString() : '---';
-        tbody.innerHTML += `<tr>
-            <td><small>${date}</small></td>
-            <td>${t.task_id}</td>
-            <td><span class="badge bg-${t.status === 'completed' ? 'success' : 'warning'}">${t.status}</span></td>
-            <td>-10 🪙</td>
-            <td>${t.result || '<i>В обработке...</i>'}</td>
-        </tr>`;
-    });
+        tasks.forEach(t => {
+            const dateStr = t.created_at ? new Date(t.created_at).toLocaleString() : 'Только что';
+            const statusBadge = t.status === 'completed' ? 'success' : 'warning';
+            tbody.innerHTML += `<tr>
+                <td><small>${dateStr}</small></td>
+                <td>${t.task_id}</td>
+                <td><span class="badge bg-${statusBadge}">${t.status}</span></td>
+                <td>${t.result || '<i>В обработке...</i>'}</td>
+            </tr>`;
+        });
+    } catch (err) { console.error("History update error:", err); }
 }
 
-// Функция выхода (Logout)
-function handleLogout() {
-    if (confirm("Вы уверены, что хотите выйти?")) {
-        localStorage.removeItem('userId');
-        localStorage.removeItem('userName');
-        alert("Вы вышли из системы");
-        location.reload(); // Возвращает на главную страницу (вкладка "О сервисе")
-    }
+// Инициализация при загрузке
+if (currentUserId) {
+    document.getElementById('userBadge').classList.remove('d-none');
+    document.getElementById('currentUserId').innerText = currentUserId;
+    document.getElementById('currentUsername').innerText = localStorage.getItem('userName');
+    
+    const btn = document.getElementById('cabinet-tab');
+    btn.setAttribute('data-bs-toggle', 'tab');
+    btn.setAttribute('data-bs-target', '#cabinet');
+    
+    updateBalance();
+    updateTasks();
+    setInterval(updateTasks, 5000);
 }

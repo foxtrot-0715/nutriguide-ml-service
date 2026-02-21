@@ -10,84 +10,85 @@
     </style>
 </head>
 <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="#">🥗 NutriGuide</a>
+            <div class="navbar-text text-white">
+                <span id="userBadge" class="d-none">
+                    Юзер: <strong id="currentUsername"></strong> | ID: <strong id="currentUserId"></strong>
+                    <button class="btn btn-sm btn-outline-danger ms-3" onclick="handleLogout()">Выйти</button>
+                </span>
+            </div>
+        </div>
+    </nav>
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
     <div class="container">
-        <a class="navbar-brand" href="#">🥗 NutriGuide</a>
-        <div class="navbar-text text-white">
-            <span id="userBadge" class="d-none">
-                Юзер: <strong id="currentUsername"></strong> | ID: <strong id="currentUserId"></strong>
-                <button class="btn btn-sm btn-outline-danger ms-3" onclick="handleLogout()">Выйти</button>
-            </span>
-        </div>
-    </div>
-</nav>
+        <ul class="nav nav-pills nav-fill mb-4" id="mainTabs">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#about">О сервисе</button></li>
+            <li class="nav-item"><button class="nav-link" id="auth-tab" data-bs-toggle="tab" data-bs-target="#auth">Вход / Регистрация</button></li>
+            <li class="nav-item"><button class="nav-link" id="cabinet-tab" onclick="checkAuth(event)">Личный кабинет</button></li>
+        </ul>
 
-<div class="container">
-    <ul class="nav nav-pills nav-fill mb-4" id="mainTabs" role="tablist">
-        <li class="nav-item"><button class="nav-link active" id="about-tab" data-bs-toggle="tab" data-bs-target="#about">О сервисе</button></li>
-        <li class="nav-item"><button class="nav-link" id="auth-tab" data-bs-toggle="tab" data-bs-target="#auth">Вход / Регистрация</button></li>
-        <li class="nav-item"><button class="nav-link disabled" id="cabinet-tab" data-bs-toggle="tab" data-bs-target="#cabinet">Личный кабинет</button></li>
-    </ul>
-
-    <div class="tab-content">
-        <div class="tab-pane fade show active" id="about">
-            <div class="hero-section text-center">
-                <h1>Интеллектуальный помощник по питанию</h1>
-                <p class="lead mt-3">Наш ML-сервис анализирует ваш рацион, предсказывает калорийность и дает рекомендации по здоровью на основе передовых нейронных сетей.</p>
-                <div class="row mt-5">
-                    <div class="col-md-4"><h3>⚡ Быстро</h3><p>Асинхронная обработка через RabbitMQ</p></div>
-                    <div class="col-md-4"><h3>📊 Точно</h3><p>Модели обучены на 100к+ рецептах</p></div>
-                    <div class="col-md-4"><h3>💰 Доступно</h3><p>Всего 10 кредитов за прогноз</p></div>
+        <div class="tab-content">
+            <div class="tab-pane fade show active" id="about">
+                <div class="hero-section text-center shadow-sm">
+                    <h1>NutriGuide ML</h1>
+                    <p class="lead mt-3">Ваш персональный диетолог на базе ИИ.</p>
                 </div>
             </div>
-        </div>
 
-        <div class="tab-pane fade" id="auth">
-            <div class="row justify-content-center">
-                <div class="col-md-5">
-                    <div class="card p-4">
-                        <h3>Создать аккаунт</h3>
-                        <div class="mb-3"><input type="text" id="regName" class="form-control" placeholder="Имя пользователя"></div>
-                        <div class="mb-3"><input type="email" id="regEmail" class="form-control" placeholder="Email"></div>
-                        <div class="mb-3"><input type="password" id="regPass" class="form-control" placeholder="Пароль"></div>
-                        <button class="btn btn-success w-100" onclick="handleRegister()">Зарегистрироваться</button>
+            <div class="tab-pane fade" id="auth">
+                <div class="row g-4">
+                    <div class="col-md-6">
+                        <div class="card p-4 shadow-sm border-primary">
+                            <h3>Вход</h3>
+                            <input type="text" id="loginName" class="form-control mb-2" placeholder="Имя">
+                            <input type="password" id="loginPass" class="form-control mb-3" placeholder="Пароль">
+                            <button class="btn btn-primary w-100" onclick="handleLogin()">Войти</button>
+                        </div>
                     </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="tab-pane fade" id="cabinet">
-            <div class="row">
-                <div class="col-md-4">
-                    <div class="card p-4 mb-4 bg-white border-primary">
-                        <h4>💰 Баланс: <span id="balanceAmount">0</span> 🪙</h4>
-                        <div class="input-group mt-3">
-                            <input type="number" id="depositAmount" class="form-control" value="50">
-                            <button class="btn btn-primary" onclick="makeDeposit()">Пополнить</button>
+                    <div class="col-md-6">
+                        <div class="card p-4 shadow-sm">
+                            <h3>Регистрация</h3>
+                            <input type="text" id="regName" class="form-control mb-2" placeholder="Имя">
+                            <input type="email" id="regEmail" class="form-control mb-2" placeholder="Email">
+                            <input type="password" id="regPass" class="form-control mb-3" placeholder="Пароль">
+                            <button class="btn btn-success w-100" onclick="handleRegister()">Создать аккаунт</button>
                         </div>
                     </div>
                 </div>
-                <div class="col-md-8">
-                    <div class="card p-4 mb-4">
-                        <h4>🚀 Новый анализ</h4>
-                        <textarea id="predictInput" class="form-control mb-3" placeholder="Пример: Обед из 200г курицы и 100г риса"></textarea>
-                        <button class="btn btn-dark w-100" onclick="sendPredict()">Отправить запрос (10 кред.)</button>
+            </div>
+
+            <div class="tab-pane fade" id="cabinet">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card p-4 mb-4 border-success shadow-sm">
+                            <h4>Баланс: <span id="balanceAmount">0</span> 🪙</h4>
+                            <div class="input-group mt-3">
+                                <input type="number" id="depositAmount" class="form-control" value="50">
+                                <button class="btn btn-success" onclick="makeDeposit()">+</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="card p-4 mb-4 shadow-sm">
+                            <h4>Новый анализ</h4>
+                            <textarea id="predictInput" class="form-control mb-3" rows="2"></textarea>
+                            <button class="btn btn-dark w-100" onclick="sendPredict()">Анализировать (10 кред.)</button>
+                        </div>
                     </div>
                 </div>
-            </div>
-            <div class="card p-4">
-                <h4>📊 История операций</h4>
-                <table class="table mt-2">
-                    <thead><tr><th>Дата</th><th>ID</th><th>Статус</th><th>Списание</th><th>Результат</th></tr></thead>
-                    <tbody id="tasksHistory"></tbody>
-                </table>
+                <div class="card p-4 shadow-sm">
+                    <h4>История запросов</h4>
+                    <table class="table mt-2">
+                        <thead><tr><th>Дата</th><th>ID</th><th>Статус</th><th>Результат</th></tr></thead>
+                        <tbody id="tasksHistory"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script src="/static/app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/app.js"></script>
 </body>
 </html>

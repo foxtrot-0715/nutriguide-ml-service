@@ -18,11 +18,6 @@ class TaskStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
-class TransactionType(str, enum.Enum):
-    REFILL = "refill"
-    WITHDRAWAL = "withdrawal"
-    BONUS = "bonus"
-
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -48,8 +43,6 @@ class MLTask(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     status: Mapped[TaskStatus] = mapped_column(SQLEnum(TaskStatus), default=TaskStatus.PENDING)
     result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # --- НОВЫЕ ПОЛЯ ДЛЯ ТЗ №6 ---
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    cost: Mapped[int] = mapped_column(Integer, default=10)
-    
+    # Добавляем автоматическую дату, чтобы история не была пустой
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     user: Mapped["User"] = relationship("User", back_populates="tasks")
