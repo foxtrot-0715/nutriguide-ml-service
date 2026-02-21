@@ -1,35 +1,55 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+import pika
+import json
+import logging
 
-from src.database.database import SessionLocal, engine
-from src.database.models import Base, User, Balance, Transaction, MLTask, TransactionType
-from src.schemas import UserCreate, UserOut, BalanceOut, DepositRequest, PredictRequest, PredictResponse, TransactionOut
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Инициализация таблиц при старте
-Base.metadata.create_all(bind=engine)
+from src.database.database import get_db, init_db
+from src.database import models
+# Импортируем все необходимые схемы напрямую
+from src.schemas import (
+    UserCreate, 
+    UserOut, 
+    PredictRequest, 
+    PredictResponse, 
+    DepositRequest
+)
+from src.auth_utils import get_password_hash
 
-app = FastAPI(title="NutriGuide ML Service API")
+# Инициализация БД
+try:
+    init_db()
+    logger.info("--- СИСТЕМА НУТРИГИД ЗАПУЩЕНА И БД ПОДКЛЮЧЕНА ---")
+except Exception as e:
+    logger.error(f"--- ОШИБКА ИНИЦИАЛИЗАЦИИ БД: {e} ---")
 
-# Dependency для получения сессии БД
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+app = FastAPI(title="NutriGuide ML Service Full API")
 
-# --- 1. AUTH & USERS ---
+# --- 1. Системные эндпоинты ---
+@app.get("/health", tags=["System"])
+def health():
+    return {"status": "online", "message": "Ready to count calories!"}
 
-@app.post("/auth/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+# --- 2. Авторизация и пользователи ---
+@app.post("/auth/register", response_model=UserOut, tags=["Auth"])
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.username == user_data.username).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    new_user = User(
+    existing = db.query(models.User).filter(
+        (models.User.username == user_data.username) | 
+        (models.User.email == user_data.email)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="User already exists")
+
+    hashed = get_password_hash(user_data.password)
+    new_user = models.User(
         username=user_data.username,
         email=user_data.email,
+        hashed_password=hashed,
         gender=user_data.gender,
         age=user_data.age
     )
@@ -37,103 +57,88 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     
-    # Создаем стартовый баланс 0
-    new_balance = Balance(user_id=new_user.id, credits=0)
-    db.add(new_balance)
+    # Создаем стартовый баланс
+    db.add(models.Balance(user_id=new_user.id, credits=100))
     db.commit()
-    
     return new_user
 
-@app.post("/auth/login")
-def login(username: str, db: Session = Depends(get_db)):
-    # Базовая аутентификация по username
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid username")
-    return {"message": "Login successful", "user_id": user.id}
-
-# --- 2. BALANCE ---
-
-@app.get("/balance/{user_id}", response_model=BalanceOut)
+# --- 3. Экономика ---
+@app.get("/users/{user_id}/balance", tags=["Economy"])
 def get_balance(user_id: int, db: Session = Depends(get_db)):
-    balance = db.query(Balance).filter(Balance.user_id == user_id).first()
+    balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
     if not balance:
         raise HTTPException(status_code=404, detail="Balance not found")
-    return balance
+    return {"user_id": user_id, "credits": balance.credits}
 
-@app.post("/balance/{user_id}/deposit", response_model=BalanceOut)
-def deposit(user_id: int, req: DepositRequest, db: Session = Depends(get_db)):
-    balance = db.query(Balance).filter(Balance.user_id == user_id).first()
+@app.post("/users/{user_id}/deposit", tags=["Economy"])
+def deposit_money(user_id: int, req: DepositRequest, db: Session = Depends(get_db)):
+    balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
     if not balance:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Balance record not found")
     
     balance.credits += req.amount
-    
-    # Логируем транзакцию
-    new_tx = Transaction(
-        user_id=user_id,
-        amount=req.amount,
-        tx_type=TransactionType.REFILL,
-        description="Deposit via API"
-    )
-    db.add(new_tx)
     db.commit()
-    db.refresh(balance)
-    return balance
+    logger.info(f"Баланс юзера {user_id} пополнен на {req.amount}")
+    return {"message": f"Successfully added {req.amount} credits", "new_balance": balance.credits}
 
-# --- 3. PREDICT (ML) ---
-
-@app.post("/predict/{user_id}", response_model=PredictResponse)
+# --- 4. ML Engine (Задачи) ---
+@app.post("/predict/{user_id}", response_model=PredictResponse, tags=["ML Engine"])
 def predict(user_id: int, req: PredictRequest, db: Session = Depends(get_db)):
-    cost = 20 # Стоимость одного запроса
-    balance = db.query(Balance).filter(Balance.user_id == user_id).first()
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Проверка экономики
+    PREDICT_COST = 10
+    balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
     
-    if not balance or balance.credits < cost:
-        raise HTTPException(status_code=402, detail="Insufficient credits")
-    
-    # Списываем кредиты
-    balance.credits -= cost
-    
-    # Создаем задачу
-    new_task = MLTask(
-        user_id=user_id,
-        result=f"Processed: {req.data}" # Заглушка ML логики
-    )
-    
-    # Логируем списание (транзакция)
-    new_tx = Transaction(
-        user_id=user_id,
-        amount=-cost,
-        tx_type=TransactionType.WITHDRAWAL,
-        description="ML Prediction Charge"
-    )
-    
+    if not balance or balance.credits < PREDICT_COST:
+        raise HTTPException(
+            status_code=402, 
+            detail=f"Insufficient credits. Need {PREDICT_COST}, you have {balance.credits if balance else 0}"
+        )
+
+    # Списание и создание задачи
+    balance.credits -= PREDICT_COST
+    new_task = models.MLTask(user_id=user_id, status=models.TaskStatus.PENDING)
     db.add(new_task)
-    db.add(new_tx)
-    db.commit()
-    db.refresh(new_task)
     
-    return {
-        "task_id": new_task.id,
-        "status": new_task.status,
-        "result": new_task.result
-    }
+    try:
+        db.commit()
+        db.refresh(new_task)
 
-# --- 4. HISTORY ---
+        # Отправка в очередь
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host='rabbitmq'))
+        channel = connection.channel()
+        channel.queue_declare(queue='ml_tasks', durable=True)
+        channel.basic_publish(
+            exchange='',
+            routing_key='ml_tasks',
+            body=json.dumps({"task_id": new_task.id, "features": {"input_data": req.data}}),
+            properties=pika.BasicProperties(delivery_mode=2)
+        )
+        connection.close()
+        
+        return PredictResponse(task_id=new_task.id, status=new_task.status, result=new_task.result)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка RabbitMQ: {e}")
+        raise HTTPException(status_code=500, detail="Message broker error. Credits preserved.")
 
-@app.get("/history/{user_id}/transactions", response_model=List[TransactionOut])
-def get_transactions(user_id: int, db: Session = Depends(get_db)):
-    # История денежных операций
-    return db.query(Transaction).filter(Transaction.user_id == user_id).all()
+@app.get("/tasks/{task_id}", response_model=PredictResponse, tags=["ML Engine"])
+def get_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(models.MLTask).filter(models.MLTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return PredictResponse(task_id=task.id, status=task.status, result=task.result)
 
-@app.get("/history/{user_id}/predictions", response_model=List[PredictResponse])
-def get_prediction_history(user_id: int, db: Session = Depends(get_db)):
-    # История ML-запросов
-    tasks = db.query(MLTask).filter(MLTask.user_id == user_id).all()
+@app.get("/users/{user_id}/tasks", response_model=List[PredictResponse], tags=["ML Engine"])
+def get_user_tasks(user_id: int, db: Session = Depends(get_db)):
+    tasks = db.query(models.MLTask).filter(models.MLTask.user_id == user_id).all()
     return [
-        {
-            "task_id": t.id,
-            "status": t.status,
-            "result": t.result
-        } for t in tasks
+        PredictResponse(
+            task_id=t.id, 
+            status=t.status, 
+            result=t.result
+        ) for t in tasks
     ]

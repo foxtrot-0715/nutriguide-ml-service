@@ -1,49 +1,74 @@
 services:
-  # 1. Наше Python приложение
+  # 1. Основное приложение FastAPI
   app:
     build: 
       context: ./app
       dockerfile: Dockerfile
-    env_file:
-      - ./app/.env
+    container_name: nutri_app
     volumes:
       - ./app/src:/app/src
-    # Добавляем команду запуска uvicorn
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-    # Пробрасываем порт 8000 наружу (на всякий случай, чтобы иметь прямой доступ мимо прокси)
     ports:
       - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://nutri_user:nutri_password@database:5432/nutriguide
+      - PYTHONPATH=/app
     depends_on:
-      - database
-      - rabbitmq
+      database:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
-  # 2. Прокси-сервер (Nginx)
-  web-proxy:
-    image: nginx:latest
-    ports:
-      - "8080:80"
-      - "8443:443"
-    volumes:
-      - ./web-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - app
-
-  # 3. Брокер сообщений (RabbitMQ)
-  rabbitmq:
-    image: rabbitmq:3-management
-    ports:
-      - "5672:5672"   # AMQP порт
-      - "15672:15672" # Management UI порт
-    volumes:
-      - ./rabbitmq_data:/var/lib/rabbitmq
-    restart: on-failure
-
-  # 4. База данных (PostgreSQL)
+  # 2. Единая база данных PostgreSQL
   database:
     image: postgres:15
+    container_name: nutri_db
+    restart: always
     environment:
-      - POSTGRES_DB=nutriguide
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=secret_password
+      POSTGRES_USER: nutri_user
+      POSTGRES_PASSWORD: nutri_password
+      POSTGRES_DB: nutriguide
+    ports:
+      - "5432:5432"
     volumes:
-      - ./postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nutri_user -d nutriguide"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. Воркеры для тяжелых вычислений
+  worker:
+    build: 
+      context: ./app
+    container_name: nutri_worker
+    volumes:
+      - ./app/src:/app/src
+    command: python -u src/worker.py 
+    environment:
+      - DATABASE_URL=postgresql://nutri_user:nutri_password@database:5432/nutriguide
+      - PYTHONPATH=/app
+    depends_on:
+      database:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+
+  # 4. Брокер сообщений RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: nutri_rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
