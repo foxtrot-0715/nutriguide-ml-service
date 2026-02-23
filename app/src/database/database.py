@@ -3,7 +3,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from . import models
 
-# Теперь код сначала смотрит в переменные окружения, а потом в дефолт
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
     "postgresql://nutri_user:nutri_password@database:5432/nutriguide"
