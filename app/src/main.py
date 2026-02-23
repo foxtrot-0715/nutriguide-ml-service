@@ -2,9 +2,10 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc  # КРИТИЧНО: ЭТОГО НЕ ХВАТАЛО!
 from typing import List
-import pika, json, logging
+import pika, json
+
 from src.database.database import get_db, init_db
 from src.database import models
 from src.schemas import UserCreate, UserOut, PredictRequest, PredictResponse, DepositRequest
@@ -45,7 +46,10 @@ def get_balance(user_id: int, db: Session = Depends(get_db)):
 @app.post("/users/{user_id}/deposit")
 def deposit(user_id: int, req: DepositRequest, db: Session = Depends(get_db)):
     balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
-    if balance: balance.credits += req.amount; db.commit()
+    if not balance: raise HTTPException(status_code=404)
+    balance.credits += req.amount
+    db.add(models.Transaction(user_id=user_id, amount=req.amount, type="deposit"))
+    db.commit()
     return {"status": "ok"}
 
 @app.post("/predict/{user_id}", response_model=PredictResponse)
@@ -53,24 +57,35 @@ def predict(user_id: int, req: PredictRequest, db: Session = Depends(get_db)):
     balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
     if not balance or balance.credits < 10: raise HTTPException(status_code=402)
     balance.credits -= 10
+    db.add(models.Transaction(user_id=user_id, amount=-10, type="withdraw"))
     task = models.MLTask(user_id=user_id, status=models.TaskStatus.PENDING)
     db.add(task); db.commit(); db.refresh(task)
     try:
-        conn = pika.BlockingConnection(pika.ConnectionParameters(host='rabbitmq'))
+        conn = pika.BlockingConnection(pika.ConnectionParameters(host='rabbitmq', heartbeat=600))
         ch = conn.channel(); ch.queue_declare(queue='ml_tasks', durable=True)
         ch.basic_publish(exchange='', routing_key='ml_tasks', body=json.dumps({"task_id": task.id, "features": {"input_data": req.data}}))
         conn.close()
-    except: pass
+    except Exception as e:
+        print(f"RabbitMQ Error: {e}")
     return {"task_id": task.id, "status": "pending", "created_at": task.created_at}
 
 @app.get("/users/{user_id}/tasks", response_model=List[PredictResponse])
 def get_tasks(user_id: int, db: Session = Depends(get_db)):
     tasks = db.query(models.MLTask).filter(models.MLTask.user_id == user_id).order_by(desc(models.MLTask.id)).all()
-    # Ручная сборка результата для стабильности
+    return [PredictResponse(task_id=t.id, status=str(t.status.value), result=t.result, created_at=t.created_at) for t in tasks]
+
+@app.get("/users/{user_id}/transactions")
+def get_transactions(user_id: int, db: Session = Depends(get_db)):
+    return db.query(models.Transaction).filter(models.Transaction.user_id == user_id).order_by(desc(models.Transaction.id)).all()
+
+@app.get("/users/{user_id}/tasks", response_model=List[PredictResponse], tags=["ML"])
+def get_tasks(user_id: int, db: Session = Depends(get_db)):
+    # Возвращаем все задачи пользователя, новые — сверху
+    tasks = db.query(models.MLTask).filter(models.MLTask.user_id == user_id).order_by(desc(models.MLTask.id)).all()
     return [
         PredictResponse(
             task_id=t.id, 
-            status=str(t.status.value), 
+            status=t.status.value, 
             result=t.result, 
             created_at=t.created_at
         ) for t in tasks

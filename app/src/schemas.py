@@ -1,7 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from datetime import datetime
-from src.database.models import GenderEnum
 
 class UserCreate(BaseModel):
     username: str
@@ -23,10 +22,9 @@ class PredictRequest(BaseModel):
 
 class PredictResponse(BaseModel):
     task_id: int
-    status: str # Используем str вместо Enum, чтобы избежать ошибок валидации
+    status: str 
     result: Optional[str] = None
     created_at: Optional[datetime] = None 
-    cost: int = 10
     
     class Config:
         from_attributes = True
