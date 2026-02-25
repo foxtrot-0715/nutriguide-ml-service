@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 from typing import List
 import pika, json
 
@@ -43,7 +43,14 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/auth/login")
 def login(user_data: UserCreate, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == user_data.email).first()
+    # Универсальный логин: ищем по email или по username
+    user = db.query(models.User).filter(
+        or_(
+            models.User.email == user_data.email,
+            models.User.username == user_data.username
+        )
+    ).first()
+    
     if not user or not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return {"id": user.id, "username": user.username}
@@ -56,14 +63,33 @@ def get_balance(user_id: int, db: Session = Depends(get_db)):
     balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
     return {"credits": balance.credits if balance else 0}
 
+@app.post("/users/{user_id}/deposit")
+def deposit_credits(user_id: int, req: DepositRequest, db: Session = Depends(get_db)):
+    balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
+    if not balance:
+        raise HTTPException(status_code=404, detail="Balance not found")
+    
+    balance.credits += req.amount
+    
+    # Записываем транзакцию пополнения
+    new_transaction = models.Transaction(
+        user_id=user_id,
+        amount=float(req.amount),
+        type="deposit"
+    )
+    db.add(new_transaction)
+    db.commit()
+    return {"new_balance": balance.credits}
+
 @app.post("/predict/{user_id}", response_model=PredictResponse)
 def predict(user_id: int, req: PredictRequest, db: Session = Depends(get_db)):
     balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
     if not balance or balance.credits < 10:
         raise HTTPException(status_code=402, detail="Insufficient credits")
     
-    # ПРАВКА: Списываем баланс + фиксируем транзакцию
     balance.credits -= 10
+    
+    # Транзакция списания
     new_transaction = models.Transaction(
         user_id=user_id,
         amount=-10.0,
@@ -92,8 +118,16 @@ def predict(user_id: int, req: PredictRequest, db: Session = Depends(get_db)):
 
 @app.get("/users/{user_id}/tasks", response_model=List[PredictResponse])
 def get_tasks(user_id: int, db: Session = Depends(get_db)):
-    tasks = db.query(models.MLTask).filter(models.MLTask.id == user_id).order_by(desc(models.MLTask.id)).all()
-    return [PredictResponse(task_id=t.id, status=str(t.status.value), result=t.result, created_at=t.created_at) for t in tasks]
+    # Исправлено: фильтрация именно по владельцу задач
+    tasks = db.query(models.MLTask).filter(models.MLTask.user_id == user_id).order_by(desc(models.MLTask.id)).all()
+    return [
+        PredictResponse(
+            task_id=t.id, 
+            status=str(t.status.value), 
+            result=t.result, 
+            created_at=t.created_at
+        ) for t in tasks
+    ]
 
 @app.get("/users/{user_id}/transactions")
 def get_transactions(user_id: int, db: Session = Depends(get_db)):
