@@ -43,7 +43,6 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/auth/login")
 def login(user_data: UserCreate, db: Session = Depends(get_db)):
-    # Универсальный логин: ищем по email или по username
     user = db.query(models.User).filter(
         or_(
             models.User.email == user_data.email,
@@ -55,14 +54,6 @@ def login(user_data: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return {"id": user.id, "username": user.username}
 
-@app.get("/users/{user_id}/balance")
-def get_balance(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
-    return {"credits": balance.credits if balance else 0}
-
 @app.post("/users/{user_id}/deposit")
 def deposit_credits(user_id: int, req: DepositRequest, db: Session = Depends(get_db)):
     balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
@@ -70,14 +61,7 @@ def deposit_credits(user_id: int, req: DepositRequest, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Balance not found")
     
     balance.credits += req.amount
-    
-    # Записываем транзакцию пополнения
-    new_transaction = models.Transaction(
-        user_id=user_id,
-        amount=float(req.amount),
-        type="deposit"
-    )
-    db.add(new_transaction)
+    db.add(models.Transaction(user_id=user_id, amount=float(req.amount), type="deposit"))
     db.commit()
     return {"new_balance": balance.credits}
 
@@ -87,19 +71,14 @@ def predict(user_id: int, req: PredictRequest, db: Session = Depends(get_db)):
     if not balance or balance.credits < 10:
         raise HTTPException(status_code=402, detail="Insufficient credits")
     
+    # 1. Списание и транзакция
     balance.credits -= 10
+    db.add(models.Transaction(user_id=user_id, amount=-10.0, type="prediction_spend"))
     
-    # Транзакция списания
-    new_transaction = models.Transaction(
-        user_id=user_id,
-        amount=-10.0,
-        type="prediction_spend"
-    )
-    db.add(new_transaction)
-    
+    # 2. Создание задачи
     task = models.MLTask(user_id=user_id, status=models.TaskStatus.PENDING)
     db.add(task)
-    db.commit() 
+    db.commit() # Фиксируем деньги и задачу в БД ПЕРЕД отправкой в очередь
     db.refresh(task)
     
     try:
@@ -118,17 +97,14 @@ def predict(user_id: int, req: PredictRequest, db: Session = Depends(get_db)):
 
 @app.get("/users/{user_id}/tasks", response_model=List[PredictResponse])
 def get_tasks(user_id: int, db: Session = Depends(get_db)):
-    # Исправлено: фильтрация именно по владельцу задач
     tasks = db.query(models.MLTask).filter(models.MLTask.user_id == user_id).order_by(desc(models.MLTask.id)).all()
-    return [
-        PredictResponse(
-            task_id=t.id, 
-            status=str(t.status.value), 
-            result=t.result, 
-            created_at=t.created_at
-        ) for t in tasks
-    ]
+    return [PredictResponse(task_id=t.id, status=str(t.status.value), result=t.result, created_at=t.created_at) for t in tasks]
 
 @app.get("/users/{user_id}/transactions")
 def get_transactions(user_id: int, db: Session = Depends(get_db)):
     return db.query(models.Transaction).filter(models.Transaction.user_id == user_id).order_by(desc(models.Transaction.id)).all()
+
+@app.get("/users/{user_id}/balance")
+def get_balance(user_id: int, db: Session = Depends(get_db)):
+    balance = db.query(models.Balance).filter(models.Balance.user_id == user_id).first()
+    return {"credits": balance.credits if balance else 0}
