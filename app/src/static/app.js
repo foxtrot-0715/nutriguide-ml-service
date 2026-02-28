@@ -1,161 +1,172 @@
-let currentUserId = localStorage.getItem('userId');
+window.currentUserId = localStorage.getItem('userId');
 
-async function updateBalance() {
-    if (!currentUserId) return;
-    try {
-        const res = await fetch(`/users/${currentUserId}/balance`);
-        const data = await res.json();
-        document.getElementById('balanceAmount').innerText = data.credits;
-    } catch (e) { console.error("Balance update failed"); }
-}
-
-async function updateTransactions() {
-    if (!currentUserId) return;
-    try {
-        const res = await fetch(`/users/${currentUserId}/transactions`);
-        const txs = await res.json();
-        const tbody = document.getElementById('transHistory');
-        if (!tbody) return;
-        tbody.innerHTML = txs.map(t => `
-            <tr>
-                <td><small>${new Date(t.created_at).toLocaleString('ru-RU')}</small></td>
-                <td>${t.amount > 0 ? '🟢 Пополнение' : '🔴 Списание'}</td>
-                <td><strong>${t.amount}</strong></td>
-            </tr>
-        `).join('') || '<tr><td colspan="3" class="text-center">Нет транзакций</td></tr>';
-    } catch (e) { console.error("Transactions update failed"); }
-}
-
-async function updateTasks() {
-    if (!currentUserId) return;
-    try {
-        const res = await fetch(`/users/${currentUserId}/tasks`);
-        const tasks = await res.json();
-        const tbody = document.getElementById('tasksHistory');
-        if (!tbody) return;
-        
-        // В твоем main.py нет эндпоинта /users/{id}/tasks, 
-        // Если история не грузится, дай знать — добавим его в main.py
-        tbody.innerHTML = tasks.map(t => `
-            <tr>
-                <td><small>${new Date(t.created_at).toLocaleString('ru-RU')}</small></td>
-                <td>${t.task_id}</td>
-                <td><span class="badge bg-${t.status === 'completed' ? 'success' : 'warning'}">${t.status}</span></td>
-                <td>${t.result || '...'}</td>
-            </tr>
-        `).join('') || '<tr><td colspan="4" class="text-center">Нет запросов</td></tr>';
-    } catch (e) { console.error("Tasks update failed"); }
-}
-
-async function handleLogin() {
-    const nameInput = document.getElementById('loginName');
-    const passInput = document.getElementById('loginPass');
-
-    const username = nameInput.value;
-    const password = passInput.value;
-
-    if (!username || !password) {
-        return alert("Введите имя и пароль!");
+// --- 1. Навигация и Видимость ---
+window.showTab = function(tabName) {
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.add('d-none'));
+    const section = document.getElementById(tabName + 'Section');
+    if (section) section.classList.remove('d-none');
+    
+    if (tabName === 'login' || tabName === 'register') {
+        document.getElementById('nav-login-btn')?.classList.toggle('active', tabName === 'login');
+        document.getElementById('nav-reg-btn')?.classList.toggle('active', tabName === 'register');
     }
+};
 
+window.updateUI = function() {
+    const isLoggedIn = !!window.currentUserId;
+    const welcome = document.getElementById('welcomeSection');
+    const cabinet = document.getElementById('cabinetSection');
+    const userBadge = document.getElementById('userBadge');
+
+    if (isLoggedIn) {
+        if (welcome) welcome.classList.add('d-none');
+        if (cabinet) cabinet.classList.remove('d-none');
+        if (userBadge) userBadge.classList.remove('d-none');
+        window.showTab('cabinet');
+    } else {
+        if (welcome) welcome.classList.remove('d-none');
+        if (cabinet) cabinet.classList.add('d-none');
+        if (userBadge) userBadge.classList.add('d-none');
+        window.showTab('login');
+    }
+};
+
+// --- 2. Авторизация ---
+window.login = async function() {
+    const u = document.getElementById('loginUser').value;
+    const p = document.getElementById('loginPass').value;
     try {
-        const response = await fetch('/auth/login', {
+        const res = await fetch('/auth/login', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ 
-                username: username, 
-                password: password, 
-                email: 'test@test.com' 
-            })
+            body: JSON.stringify({username: u, password: p})
         });
-
-        if (response.ok) {
-            const user = await response.json();
-            // ИСПРАВЛЕНО: Сохраняем напрямую в localStorage
-            localStorage.setItem('userId', user.id);
-            localStorage.setItem('userName', user.username);
+        if (res.ok) {
+            const data = await res.json();
+            localStorage.setItem('userId', data.id);
+            localStorage.setItem('userName', data.username);
+            window.currentUserId = data.id;
             location.reload();
         } else {
-            alert("Ошибка входа: проверьте имя и пароль");
+            alert("Ошибка входа: неверный логин или пароль");
         }
-    } catch (err) {
-        console.error("Login request failed", err);
-    }
-}
+    } catch (e) { alert("Сервер недоступен"); }
+};
 
-async function handleRegister() {
-    const username = document.getElementById('regName').value;
-    const email = document.getElementById('regEmail').value;
-    const password = document.getElementById('regPass').value;
-    
-    if (!username || !password || !email) return alert("Заполните все поля!");
-
+window.register = async function() {
+    const u = document.getElementById('regUser').value;
+    const e = document.getElementById('regEmail').value;
+    const p = document.getElementById('regPass').value;
     try {
-        const response = await fetch('/auth/register', {
+        const res = await fetch('/auth/register', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username, email, password })
+            body: JSON.stringify({username: u, email: e, password: p})
         });
-        if (response.ok) {
-            const user = await response.json();
-            localStorage.setItem('userId', user.id);
-            localStorage.setItem('userName', user.username);
-            location.reload();
-        } else { alert("Ошибка регистрации!"); }
-    } catch (err) { console.error("Register failed", err); }
-}
+        if (res.ok) {
+            alert("Регистрация успешна!");
+            window.showTab('login');
+        } else {
+            alert("Ошибка регистрации");
+        }
+    } catch (ex) { alert("Сервер недоступен"); }
+};
 
-function handleLogout() {
+window.logout = function() {
     localStorage.clear();
+    window.currentUserId = null;
     location.reload();
-}
+};
 
-async function makeDeposit() {
-    const amount = document.getElementById('depositAmount').value;
-    const res = await fetch(`/users/${currentUserId}/deposit`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ amount: parseInt(amount) })
-    });
-    if (res.ok) {
-        await updateBalance();
-        await updateTransactions();
-    }
-}
+// --- 3. Кабинет ---
+window.updateBalance = async function() {
+    if (!window.currentUserId) return;
+    const res = await fetch(`/users/${window.currentUserId}/balance`);
+    const data = await res.json();
+    document.getElementById('balanceAmount').innerText = data.credits;
+};
 
-async function sendPredict() {
+window.updateTransactions = async function() {
+    if (!window.currentUserId) return;
+    const res = await fetch(`/users/${window.currentUserId}/transactions`);
+    const txs = await res.json();
+    const tbody = document.getElementById('transHistory');
+    if (!tbody) return;
+    tbody.innerHTML = txs.map(t => `
+        <tr>
+            <td><small>${new Date(t.created_at).toLocaleString('ru-RU')}</small></td>
+            <td>${t.type === 'refund_empty_request' ? '🔄 Возврат' : (t.amount > 0 ? '🟢 Пополнение' : '🔴 Списание')}</td>
+            <td><strong>${t.amount}</strong></td>
+        </tr>
+    `).join('') || '<tr><td colspan="3" class="text-center text-muted">История пуста</td></tr>';
+};
+
+window.updateTasks = async function() {
+    if (!window.currentUserId) return;
+    const res = await fetch(`/users/${window.currentUserId}/tasks`);
+    const tasks = await res.json();
+    const tbody = document.getElementById('tasksHistory');
+    if (!tbody) return;
+    tbody.innerHTML = tasks.map(t => `
+        <tr>
+            <td><small>${new Date(t.created_at).toLocaleString('ru-RU')}</small></td>
+            <td>#${t.task_id || t.id}</td>
+            <td><span class="badge ${t.status === 'completed' ? 'bg-success' : 'bg-warning'}">${t.status}</span></td>
+            <td>${t.result || '<span class="text-muted small">Обработка...</span>'}</td>
+        </tr>
+    `).join('') || '<tr><td colspan="4" class="text-center text-muted">Запросов нет</td></tr>';
+};
+
+// Функция отправки (валидация на стороне клиента убрана для теста возврата средств)
+window.sendPredict = async function() {
     const input = document.getElementById('predictInput');
-    const res = await fetch(`/predict/${currentUserId}`, {
+    const content = input.value; // Отправляем как есть, даже если пусто
+
+    try {
+        const res = await fetch(`/predict/${window.currentUserId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ data: content })
+        });
+
+        if (res.ok) {
+            input.value = '';
+            alert("Запрос отправлен!");
+        } else {
+            const err = await res.json();
+            // Здесь ловим 400 ошибку от бэкенда при пустом запросе
+            alert(err.detail || "Произошла ошибка");
+        }
+    } catch (e) {
+        alert("Ошибка связи с сервером");
+    } finally {
+        // Сразу обновляем баланс и транзакции, чтобы увидеть +10 возвратных
+        await window.updateBalance();
+        await window.updateTransactions();
+        await window.updateTasks();
+    }
+};
+
+window.deposit = async function() {
+    const amount = prompt("Сумма пополнения:");
+    if (!amount || isNaN(amount)) return;
+    await fetch(`/users/${window.currentUserId}/deposit`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ data: input.value })
+        body: JSON.stringify({ amount: parseFloat(amount) })
     });
-    if (res.ok) {
-        input.value = '';
-        await updateBalance();
-        await updateTasks();
-        await updateTransactions();
-    }
-}
+    await window.updateBalance();
+    await window.updateTransactions();
+};
 
 document.addEventListener('DOMContentLoaded', () => {
-    if (currentUserId) {
-        const userBadge = document.getElementById('userBadge');
-        if (userBadge) userBadge.classList.remove('d-none');
-        
-        const usernameEl = document.getElementById('currentUsername');
-        const userIdEl = document.getElementById('currentUserId');
-        if (usernameEl) usernameEl.innerText = localStorage.getItem('userName');
-        if (userIdEl) userIdEl.innerText = currentUserId;
-        
-        const cabinetBtn = document.getElementById('cabinet-tab');
-        if (cabinetBtn) {
-            setTimeout(() => cabinetBtn.click(), 100);
-        }
-
-        updateBalance();
-        updateTasks();
-        updateTransactions();
-        setInterval(updateTasks, 5000);
+    window.updateUI();
+    if (window.currentUserId) {
+        document.getElementById('currentUsername').innerText = localStorage.getItem('userName') || 'User';
+        document.getElementById('currentUserId').innerText = window.currentUserId;
+        window.updateBalance();
+        window.updateTasks();
+        window.updateTransactions();
+        setInterval(window.updateTasks, 5000);
     }
 });
